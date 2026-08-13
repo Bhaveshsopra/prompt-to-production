@@ -35,17 +35,17 @@ SEVERITY_KEYWORDS = [
 ]
 
 
+def find_match(text, keywords):
+    """Return the first matching keyword."""
+    for keyword in keywords:
+        if keyword in text:
+            return keyword
+    return None
+
+
 def classify_complaint(row: dict) -> dict:
-    """
-    Classify one complaint row.
-
-    Returns:
-        complaint_id, category, priority, reason, flag
-    """
-
     complaint_id = row.get("complaint_id", "")
 
-    # Find the complaint description column.
     description = (
         row.get("description")
         or row.get("complaint")
@@ -56,103 +56,103 @@ def classify_complaint(row: dict) -> dict:
 
     description = str(description).strip()
 
-    # Handle missing/null descriptions safely.
     if not description:
         return {
             "complaint_id": complaint_id,
             "category": "Other",
             "priority": "Standard",
-            "reason": 'No complaint description was provided.',
+            "reason": "No complaint description was provided.",
             "flag": "NEEDS_REVIEW",
         }
 
     text = description.lower()
 
-    # Severity always overrides normal priority.
-    if any(keyword in text for keyword in SEVERITY_KEYWORDS):
+    severity_match = find_match(text, SEVERITY_KEYWORDS)
+
+    if severity_match:
         priority = "Urgent"
     else:
         priority = "Standard"
 
-    # Category classification using only allowed categories.
-    if "pothole" in text:
-        category = "Pothole"
+    category = "Other"
+    category_match = None
 
-    elif any(word in text for word in [
-        "flood",
-        "flooding",
-        "waterlogged",
-        "water logging",
-    ]):
-        category = "Flooding"
+    rules = [
+        (
+            "Pothole",
+            ["pothole"],
+        ),
+        (
+            "Flooding",
+            ["flood", "flooding", "waterlogged", "water logging"],
+        ),
+        (
+            "Streetlight",
+            ["streetlight", "street light", "lamp post"],
+        ),
+        (
+            "Waste",
+            ["garbage", "waste", "trash", "rubbish", "dumped"],
+        ),
+        (
+            "Noise",
+            ["noise", "loud music", "loudspeaker", "music past midnight"],
+        ),
+        (
+            "Road Damage",
+            [
+                "road damage",
+                "damaged road",
+                "cracked road",
+                "road surface",
+                "cracked",
+                "sinking",
+                "broken",
+                "footpath tiles",
+                "upturned",
+            ],
+        ),
+        (
+            "Heritage Damage",
+            ["heritage", "monument", "historical building"],
+        ),
+        (
+            "Heat Hazard",
+            ["heatwave", "heat wave", "extreme heat", "heat hazard"],
+        ),
+        (
+            "Drain Blockage",
+            ["drain", "drainage", "blocked drain", "manhole"],
+        ),
+    ]
 
-    elif any(word in text for word in [
-        "streetlight",
-        "street light",
-        "lamp post",
-    ]):
-        category = "Streetlight"
+    for possible_category, keywords in rules:
+        match = find_match(text, keywords)
 
-    elif any(word in text for word in [
-        "garbage",
-        "waste",
-        "trash",
-        "rubbish",
-    ]):
-        category = "Waste"
+        if match:
+            category = possible_category
+            category_match = match
+            break
 
-    elif any(word in text for word in [
-        "noise",
-        "loud music",
-        "loudspeaker",
-    ]):
-        category = "Noise"
+    flag = ""
 
-    elif any(word in text for word in [
-        "road damage",
-        "damaged road",
-        "cracked road",
-    ]):
-        category = "Road Damage"
-
-    elif any(word in text for word in [
-        "heritage",
-        "monument",
-        "historical building",
-    ]):
-        category = "Heritage Damage"
-
-    elif any(word in text for word in [
-        "heatwave",
-        "heat wave",
-        "extreme heat",
-        "heat hazard",
-    ]):
-        category = "Heat Hazard"
-
-    elif any(word in text for word in [
-        "drain",
-        "drainage",
-        "blocked drain",
-    ]):
-        category = "Drain Blockage"
-
-    else:
-        category = "Other"
-
-    # Genuinely unknown category requires review.
-    flag = "NEEDS_REVIEW" if category == "Other" else ""
-
-    # Reason cites specific words from the description.
-    reason = f'Classification based on the complaint description: "{description}".'
-
-    # Final enforcement checks.
-    if category not in ALLOWED_CATEGORIES:
-        category = "Other"
+    if category == "Other":
         flag = "NEEDS_REVIEW"
+        reason = (
+            f'No allowed category keyword was clearly identified in '
+            f'the description: "{description}".'
+        )
+    else:
+        reason = (
+            f'The word/phrase "{category_match}" in the description '
+            f'supports the category {category}.'
+        )
 
-    if priority not in ALLOWED_PRIORITIES:
-        priority = "Standard"
+        if severity_match:
+            reason += (
+                f' The severity keyword "{severity_match}" makes the '
+                f'priority Urgent.'
+            )
 
     return {
         "complaint_id": complaint_id,
@@ -164,12 +164,6 @@ def classify_complaint(row: dict) -> dict:
 
 
 def batch_classify(input_path: str, output_path: str):
-    """
-    Read input CSV, classify every row, and write results.
-
-    Bad or incomplete rows do not stop the entire batch.
-    """
-
     results = []
 
     with open(input_path, "r", encoding="utf-8-sig", newline="") as infile:
@@ -182,21 +176,20 @@ def batch_classify(input_path: str, output_path: str):
             try:
                 result = classify_complaint(row)
 
-                # Preserve the original row.
                 output_row = dict(row)
-
-                # Add required classification fields.
                 output_row.update(result)
 
                 results.append(output_row)
 
             except Exception as error:
-                # Do not crash the complete batch.
                 results.append({
                     "complaint_id": row.get("complaint_id", ""),
                     "category": "Other",
                     "priority": "Standard",
-                    "reason": f"Row {row_number} could not be classified safely: {error}.",
+                    "reason": (
+                        f"Row {row_number} could not be classified safely: "
+                        f"{error}."
+                    ),
                     "flag": "NEEDS_REVIEW",
                 })
 
