@@ -36,7 +36,6 @@ SEVERITY_KEYWORDS = [
 
 
 def find_match(text, keywords):
-    """Return the first matching keyword."""
     for keyword in keywords:
         if keyword in text:
             return keyword
@@ -44,6 +43,7 @@ def find_match(text, keywords):
 
 
 def classify_complaint(row: dict) -> dict:
+
     complaint_id = row.get("complaint_id", "")
 
     description = (
@@ -69,34 +69,74 @@ def classify_complaint(row: dict) -> dict:
 
     severity_match = find_match(text, SEVERITY_KEYWORDS)
 
-    if severity_match:
-        priority = "Urgent"
-    else:
-        priority = "Standard"
+    priority = "Urgent" if severity_match else "Standard"
 
     category = "Other"
     category_match = None
 
+    # More specific categories are checked first.
     rules = [
         (
+            "Heritage Damage",
+            [
+                "heritage",
+                "historic",
+                "historical",
+                "heritage stone",
+                "heritage zone",
+                "heritage precinct",
+            ],
+        ),
+        (
             "Pothole",
-            ["pothole"],
+            [
+                "pothole",
+            ],
         ),
         (
             "Flooding",
-            ["flood", "flooding", "waterlogged", "water logging"],
-        ),
-        (
-            "Streetlight",
-            ["streetlight", "street light", "lamp post"],
-        ),
-        (
-            "Waste",
-            ["garbage", "waste", "trash", "rubbish", "dumped"],
+            [
+                "flood",
+                "flooding",
+                "waterlogged",
+                "water logging",
+                "inaccessible due to rain",
+            ],
         ),
         (
             "Noise",
-            ["noise", "loud music", "loudspeaker", "music past midnight"],
+            [
+                "noise",
+                "loud music",
+                "loudspeaker",
+                "music past midnight",
+                "wedding band",
+                "band playing",
+                "amplifier",
+                "amplifiers",
+            ],
+        ),
+        (
+            "Streetlight",
+            [
+                "streetlight",
+                "street light",
+                "lamp post",
+                "darkness",
+                "lights out",
+                "substation tripped",
+            ],
+        ),
+        (
+            "Waste",
+            [
+                "garbage",
+                "waste",
+                "trash",
+                "rubbish",
+                "dumped",
+                "overflowing bins",
+            ],
         ),
         (
             "Road Damage",
@@ -105,24 +145,37 @@ def classify_complaint(row: dict) -> dict:
                 "damaged road",
                 "cracked road",
                 "road surface",
+                "road surface cracked",
+                "road surface buckled",
+                "buckled",
                 "cracked",
                 "sinking",
-                "broken",
+                "subsided",
+                "broken footpath",
+                "footpath broken",
                 "footpath tiles",
                 "upturned",
+                "broken and sinking",
             ],
         ),
         (
-            "Heritage Damage",
-            ["heritage", "monument", "historical building"],
-        ),
-        (
             "Heat Hazard",
-            ["heatwave", "heat wave", "extreme heat", "heat hazard"],
+            [
+                "heatwave",
+                "heat wave",
+                "extreme heat",
+                "heat hazard",
+            ],
         ),
         (
             "Drain Blockage",
-            ["drain", "drainage", "blocked drain", "manhole"],
+            [
+                "blocked drain",
+                "drain blocked",
+                "drain blockage",
+                "blocked drainage",
+                "manhole blocked",
+            ],
         ),
     ]
 
@@ -134,25 +187,34 @@ def classify_complaint(row: dict) -> dict:
             category_match = match
             break
 
-    flag = ""
-
     if category == "Other":
         flag = "NEEDS_REVIEW"
+
         reason = (
-            f'No allowed category keyword was clearly identified in '
+            f'No allowed category could be determined confidently from '
             f'the description: "{description}".'
         )
+
     else:
+        flag = ""
+
         reason = (
-            f'The word/phrase "{category_match}" in the description '
-            f'supports the category {category}.'
+            f'The phrase "{category_match}" supports the category '
+            f'"{category}".'
         )
 
         if severity_match:
             reason += (
                 f' The severity keyword "{severity_match}" makes the '
-                f'priority Urgent.'
+                f'priority "Urgent".'
             )
+
+    if category not in ALLOWED_CATEGORIES:
+        category = "Other"
+        flag = "NEEDS_REVIEW"
+
+    if priority not in ALLOWED_PRIORITIES:
+        priority = "Standard"
 
     return {
         "complaint_id": complaint_id,
@@ -164,15 +226,18 @@ def classify_complaint(row: dict) -> dict:
 
 
 def batch_classify(input_path: str, output_path: str):
+
     results = []
 
     with open(input_path, "r", encoding="utf-8-sig", newline="") as infile:
+
         reader = csv.DictReader(infile)
 
         if not reader.fieldnames:
             raise ValueError("Input CSV has no header.")
 
         for row_number, row in enumerate(reader, start=2):
+
             try:
                 result = classify_complaint(row)
 
@@ -182,6 +247,7 @@ def batch_classify(input_path: str, output_path: str):
                 results.append(output_row)
 
             except Exception as error:
+
                 results.append({
                     "complaint_id": row.get("complaint_id", ""),
                     "category": "Other",
@@ -200,6 +266,7 @@ def batch_classify(input_path: str, output_path: str):
             output_fields.append(field)
 
     with open(output_path, "w", encoding="utf-8", newline="") as outfile:
+
         writer = csv.DictWriter(
             outfile,
             fieldnames=output_fields,
@@ -211,6 +278,7 @@ def batch_classify(input_path: str, output_path: str):
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser(
         description="UC-0A Complaint Classifier"
     )
